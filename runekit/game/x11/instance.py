@@ -86,14 +86,18 @@ class X11GameInstance(QtGrabMixin, QtEmbedMixin, PsUtilNetStat, GameInstance):
         if self.cached_position:
             return self.cached_position
 
-        geom = self.manager.connection.core.GetGeometry(self.wid).reply()
-        translated = self.manager.connection.core.TranslateCoordinates(
-            self.wid, self.manager.screen.root, 0, 0
-        ).reply()
+        qt_geom = self.qwindow.geometry()
 
-        self.cached_position = QRect(
-            translated.dst_x, translated.dst_y, geom.width, geom.height
+        self.logger.debug(
+            "Qt game geometry: x=%d y=%d w=%d h=%d DPR=%s",
+            qt_geom.x(),
+            qt_geom.y(),
+            qt_geom.width(),
+            qt_geom.height(),
+            self.qwindow.devicePixelRatio(),
         )
+
+        self.cached_position = QRect(qt_geom)
         return self.cached_position
 
     def get_scaling(self) -> float:
@@ -162,10 +166,17 @@ class X11GameInstance(QtGrabMixin, QtEmbedMixin, PsUtilNetStat, GameInstance):
     def on_config(self, evt: xcffib.xproto.ConfigureNotifyEvent):
         self.name_pixmap()
 
-        translated = self.manager.connection.core.TranslateCoordinates(
-            self.wid, self.manager.screen.root, 0, 0
-        ).reply()
-        size = QRect(translated.dst_x, translated.dst_y, evt.width, evt.height)
+        qt_geom = self.qwindow.geometry()
+        size = QRect(qt_geom)
+
+        self.logger.debug(
+            "Qt game geometry changed: x=%d y=%d w=%d h=%d DPR=%s",
+            size.x(),
+            size.y(),
+            size.width(),
+            size.height(),
+            self.qwindow.devicePixelRatio(),
+        )
 
         self.cached_position = size
         self.positionChanged.emit(size)
