@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 def qpixmap_to_np(im: QPixmap) -> np.ndarray:
+    if im.isNull():
+        raise ValueError(
+            "Cannot convert a null QPixmap: screen grab returned nothing. "
+            "This usually means Qt is running on Wayland; set QT_QPA_PLATFORM=xcb."
+        )
+
     # from PIL.ImageQt.fromqimage
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.ReadWrite)
