@@ -73,7 +73,7 @@ class DesktopWideOverlay(QMainWindow):
         instance.focusChanged.connect(focusChanged)
 
         instance_pos = instance.get_position()
-        gfx = QGraphicsRectItem(instance_pos.x(), instance_pos.y(), instance_pos.width(), instance_pos.height())
+        gfx = QGraphicsRectItem(0, 0, instance_pos.width(), instance_pos.height())
         gfx.setPen(self.transparent_pen)
         gfx.setPos(instance_pos.x(), instance_pos.y())
         self.scene.addItem(gfx)
