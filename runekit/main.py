@@ -61,9 +61,9 @@ def main(app_url, game_index, qt_args):
     setup_logging()
 
     # This app relies on X11 (xcffib/XComposite) to discover and capture the
-    # game window. Force the xcb platform plugin so it keeps working when the
-    # session runs on Wayland (via XWayland) instead of returning null screenshots.
-    if sys.platform == "linux":
+    # game window. On a Wayland session, force the xcb platform plugin so it
+    # keeps working via XWayland instead of returning null screenshots.
+    if sys.platform == "linux" and os.environ.get("XDG_SESSION_TYPE") == "wayland":
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
     logging.info("Starting QtWebEngine")

@@ -14,6 +14,12 @@ _debug_dump_file = False
 logger = logging.getLogger(__name__)
 
 
+def is_wayland() -> bool:
+    return os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(
+        os.environ.get("WAYLAND_DISPLAY")
+    )
+
+
 def qpixmap_to_np(im: QPixmap) -> np.ndarray:
     if im.isNull():
         raise ValueError(

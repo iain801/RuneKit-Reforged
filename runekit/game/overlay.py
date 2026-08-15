@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem,
 )
 
-from .qt import qpixmap_to_np
+from .qt import qpixmap_to_np, is_wayland
 from ..image import is_color_percent_gte
 
 if TYPE_CHECKING:
@@ -109,5 +109,12 @@ class DesktopWideOverlay(QMainWindow):
             return
         image = qpixmap_to_np(screenshot)
         if is_color_percent_gte(image, color=[0, 0, 0], percent=0.95):
-            self.logger.warning("Detected black screen condition. Ignoring compatibility check.")
-            return
+            if is_wayland():
+                # XWayland's root window is always black, so this check can't
+                # tell whether the overlay is the culprit. Never hide there.
+                self.logger.warning(
+                    "Detected black screen condition. Ignoring compatibility check."
+                )
+                return
+            self.logger.warning("Detected black screen condition. Disabling overlay")
+            self.hide()
