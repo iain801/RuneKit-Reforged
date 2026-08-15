@@ -108,6 +108,8 @@ class X11GameInstance(QtGrabMixin, QtEmbedMixin, PsUtilNetStat, GameInstance):
             pos.setY(0)
 
         screen = QGuiApplication.screenAt(pos)
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
         return screen.devicePixelRatio()
 
     def is_focused(self) -> bool:
