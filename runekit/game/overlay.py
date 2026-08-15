@@ -102,7 +102,12 @@ class DesktopWideOverlay(QMainWindow):
     def _check_compatibility(self):
         # If we cause black screen then hide ourself out of shame...
         screenshot = QGuiApplication.primaryScreen().grabWindow(0)
+        if screenshot.isNull():
+            self.logger.warning(
+                "Screen grab unavailable; skipping compatibility check."
+            )
+            return
         image = qpixmap_to_np(screenshot)
         if is_color_percent_gte(image, color=[0, 0, 0], percent=0.95):
-            self.logger.warning("Detected black screen condition. Disabling overlay")
-            self.hide()
+            self.logger.warning("Detected black screen condition. Ignoring compatibility check.")
+            return
