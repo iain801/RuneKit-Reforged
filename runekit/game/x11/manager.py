@@ -18,6 +18,13 @@ from ..overlay import DesktopWideOverlay
 MAX_SHM = 10
 NET_ACTIVE_WINDOW = "_NET_ACTIVE_WINDOW"
 WM_APP_NAME = os.getenv("RK_WM_APP_NAME", "RuneScape")
+WM_NAME = "_NET_WM_NAME"
+WM_PID = "_NET_WM_PID"
+WM_PROC_NAME = os.getenv("RK_WM_PROC_NAME", "rs2client").lower()
+
+# Window classes used by compositors/XWayland to wrap client windows as
+# decoration. These are never the game itself, even if the title matches.
+FRAME_CLASSES = {"mutter-x11-frames", "kwin_x11"}
 
 
 class X11GameManager(GameManager):
@@ -103,7 +110,44 @@ class X11GameManager(GameManager):
             return False
 
         instance_name, app_name = wm_class.split("\00")
-        return app_name == WM_APP_NAME
+
+        if app_name == WM_APP_NAME:
+            return True
+
+        if app_name in FRAME_CLASSES:
+            return False
+
+        # Proton/Wine run the game under a generic WM_CLASS (e.g. "steam_proton")
+        # while keeping the title "RuneScape", and the launcher shares that same
+        # title. Disambiguate using the game client's process name (rs2client.exe).
+        try:
+            wm_name = self.get_property(wid, WM_NAME)
+        except xcffib.xproto.WindowError:
+            return False
+
+        if wm_name != WM_APP_NAME:
+            return False
+
+        pid = self._get_window_pid(wid)
+        if not pid:
+            return False
+
+        proc_name = self._get_process_name(pid)
+        return proc_name is not None and WM_PROC_NAME in proc_name.lower()
+
+    def _get_window_pid(self, wid: int):
+        try:
+            return self.get_property(wid, WM_PID)
+        except xcffib.xproto.WindowError:
+            return None
+
+    @staticmethod
+    def _get_process_name(pid: int):
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                return f.read().strip()
+        except OSError:
+            return None
 
     def get_active_window(self) -> int:
         return self.get_property(self.screen.root, "_NET_ACTIVE_WINDOW")
@@ -135,6 +179,8 @@ class X11GameManager(GameManager):
 
         if reply.type == xcffib.xproto.Atom.STRING:
             return reply.value.to_string()[:-1]
+        elif reply.type == self.get_atom("UTF8_STRING"):
+            return reply.value.to_utf8()
         elif reply.type in (xcffib.xproto.Atom.WINDOW, xcffib.xproto.Atom.CARDINAL):
             return struct.unpack("=I", reply.value.buf()[:4])[0]
 
