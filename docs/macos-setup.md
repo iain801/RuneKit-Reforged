@@ -2,9 +2,9 @@
 
 ## Packaged release
 
-[Grab the packaged .app](https://github.com/whs/runekit/releases/tag/platypus-initial)
+[Upstream packaged .app](https://github.com/Jcapehart2/RuneKit-Reforged/releases/tag/continuous)
 
-Note that it might be outdated from the source release
+This upstream build does not include this fork’s changes; macOS support remains experimental and untested.
 
 ## Running from source
 
@@ -22,7 +22,7 @@ We're going to begin by downloading the code as a zip file. You can do this by c
 
 ![download the code](./images/download-code.png)
 
-Then, go ahead and open it with `Archive Utitlity`:
+Then, go ahead and open it with `Archive Utility`:
 
 ![unzip](./images/unzip.png)
 
@@ -46,13 +46,13 @@ You can check that this worked by closing and reopening your terminal, then runn
 
 Awesome, we'll need this tool later. For now, on to Python.
 
-### (3/4) Installing Python (3.9.1)
+### (3/4) Installing Python (3.13)
 
-Alright, we're going to install Python the straightforward way. We're going to do that by visiting Python's website [here](https://www.python.org/downloads/release/python-391/) and downloading + running the `macOS 64-bit` installer (which of the two depends on what type of mac you have).
+Run the following command in your terminal:
 
-![install python](./images/install-python.png)
-
-If you're having trouble finding the downloads at the link, remember to scroll to the bottom of the page.
+```bash
+brew install python@3.13
+```
 
 ### (4/4) Installing poetry
 
@@ -64,12 +64,12 @@ brew install poetry
 
 ### One last thing...
 
-Before you go and run the commands from the other page, you'll want to change what file directory your terminal is in to be the folder where you downloaded `runekit-master`. Assuming you downloaded it as instructed in step 1, you can do this by running the following:
+Before you go and run the commands from the other page, you'll want to change what file directory your terminal is in to be the folder where you downloaded `RuneKit-Reforged-main`. Assuming you downloaded it as instructed in step 1, you can do this by running the following:
 
 ```bash
-cd ~/Downloads/runekit-master
+cd ~/Downloads/RuneKit-Reforged-main
 ```
 
 **Note**: if you close and reopen the terminal, you'll need to renavigate to the correct folder (just rerun the above command).
 
-That simple. Now you can go back to the other file and pick up where you left off, [here](../README.md#running).
+That simple. Now you can go back to the other file and pick up where you left off, [here](../README.md#macos-quick-start-building-from-source).

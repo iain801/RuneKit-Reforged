@@ -12,7 +12,7 @@
 The `game` package is the only one allowed to use platform-dependent code. All other packages should use Qt functionalities, or put the code in this package.
 
 - game: Interact with the game window. Since accessing other application's window is not abstracted by Qt, this package is the only one allowed to be platform dependent 
-- image: Image processing tools
+- image: Image processing tools, including CPU and optional GPU subimage matching
 
 ### Image format
 The library has two internal image formats:
@@ -20,14 +20,14 @@ The library has two internal image formats:
 - numpy.ndarray of shape (height, width, 4)
   - Current standard
   - Store pixels in BGRA32 format (ARGB 8 bit per channel in little endian)
-  - Should be faster as no channel swapping is needed
-  - Requires copying when accessing raw buffer
-  - Support OpenCV operation
+  - BGRA transfers need no channel swapping; raw RGBA transfers swap red and blue
+  - Serializing with `tobytes()` copies the pixel data
+  - Supports OpenCV operations and optional PyOpenCL matching
 - PIL Image
   - Deprecated
   - Store pixels in RGBA32 format
   - Slower as when communicating with Alt1 we need to swap to BGRA
-  - Can access raw buffer without copying
+  - Serializing with `tobytes()` copies the pixel data
   - Easier to work with for basic operations
 
 ## App

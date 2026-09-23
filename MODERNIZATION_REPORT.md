@@ -10,13 +10,13 @@ The upstream RuneKit was unmaintained since ~2021, pinned to Python 3.9 (EOL), P
 
 | Package | Old Version | New Version | Notes |
 |---|---|---|---|
-| Python | ^3.9,<3.10 | ^3.11 | 3.9 reached EOL Oct 2025 |
+| Python | ^3.9,<3.10 | >=3.11,<3.15 | 3.9 reached EOL Oct 2025 |
 | PySide2 | ^5.15.2 | — | Removed (replaced by PySide6) |
 | PySide6 | — | ^6.6.0 | Qt6 replacement |
-| PySide6-WebEngine | — | ^6.6.0 | Separate package in Qt6 |
-| Pillow | ^8.3.1 | ^10.2.0 | Fixes CVE-2022-22817, CVE-2023-44271 and others |
+| Pillow | ^8.3.1 | ^12.0.0 | Fixes CVE-2022-22817, CVE-2023-44271 and others |
 | numpy | (implicit) | >=1.24.0 | Made explicit; old numpy had CVE-2021-33430 |
-| opencv-python-headless | ^4.5.3.56 | ^4.9.0 | Updated for Python 3.11 compat |
+| opencv-python-headless | ^4.5.3.56 | ^4.9.0 | CPU image processing |
+| pyopencl | — | ^2026.1.4 | Optional GPU matching dependency; installed by the launcher by default |
 | requests | ^2.26.0 | ^2.31.0 | Fixes CVE-2023-32681 |
 | click | ^8.0.1 | ^8.1.0 | Minor update |
 | psutil | ^5.8.0 | ^5.9.0 | Minor update |
@@ -72,13 +72,13 @@ Qt6 requires fully-qualified enum values. Examples:
 
 ## CI/CD Changes
 
-- **build-appimage.yml**: Ubuntu 18.04 → 24.04, Python 3.9 → 3.11, Poetry via pip
-- **build-mac.yml**: macOS 11 → 14, Python 3.9 → 3.11
+- **build.yml / build-linux**: Ubuntu 18.04 → 24.04, Python 3.9 → 3.11, Poetry via pip
+- **build.yml / build-mac**: macOS 11 → 14, Python 3.9 → 3.11
 - **All workflows**: GitHub Actions updated (checkout@v4, setup-python@v5, cache@v4, softprops/action-gh-release@v2)
 - **All workflows**: Branch references updated from `master` to `main`
 
 ## Known Issues
 
-- Overlay transparency may not work correctly on Wayland (X11 fallback recommended)
-- `qwebchannel.js` resource path (`:/qtwebchannel/qwebchannel.js`) should be verified at runtime
-- `QWebEngineUrlRequestJob.requestHeaders()` return type may differ in Qt6 — needs runtime verification
+- Native Wayland game windows are unsupported; RuneKit selects Qt’s `xcb` backend for XWayland game windows.
+- Mixed-scale and multi-monitor overlay layouts still need live testing.
+- macOS support remains experimental and untested.

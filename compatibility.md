@@ -15,7 +15,7 @@
 - [x] alt1.rsWidth, rsHeight, rsScaling
 - [x] alt1.rsActive
 - [x] alt1.userResize
-- [ ] alt1.identiyAppUrl
+- [ ] alt1.identifyAppUrl
 - [x] alt1.openBrowser
 - [x] alt1.clearBinds
 - [ ] alt1.registerStatusDaemon
@@ -47,7 +47,7 @@
 - [ ] alt1.bindReadStringEx
 - [ ] alt1.bindReadRightClickString
 - [ ] alt1.bindGetPixel
-- [ ] alt1.bindFindSubImg
+- [x] alt1.bindFindSubImg
 
 # Alt1 Events
 
@@ -57,6 +57,6 @@
 - [ ] daemonrun
 - [ ] userevent
 - [x] rsfocus
-- [x] blur
+- [x] rsblur
 
 rslinked, rsunlinked probably not going to be implemented

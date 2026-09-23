@@ -4,13 +4,13 @@
 
 RuneKit Reforged lets you run [Alt1 toolkit](https://runeapps.org/alt1) apps (clue solvers, XP meters, AFK timers, and more) alongside the **official RuneScape 3 client** on Linux. It works by reading your game screen through screenshots — it does not modify the game client.
 
-Reforged from the original [whs/runekit](https://github.com/whs/runekit) which was abandoned in 2021. Rebuilt with Python 3.12, Qt6, and modern dependencies for a stable experience on current Linux distros.
+Forked from [Jcapehart2/RuneKit-Reforged](https://github.com/Jcapehart2/RuneKit-Reforged), based on the original [whs/runekit](https://github.com/whs/runekit). Uses Python 3.11–3.14, Qt6, and modern dependencies.
 
 ---
 
 ## Download
 
-Pre-built binaries are available from the [continuous release](https://github.com/Jcapehart2/RuneKit-Reforged/releases/tag/continuous), automatically built from the latest commit on `main`:
+This fork currently requires [building from source](#quick-start). The following [upstream binaries](https://github.com/Jcapehart2/RuneKit-Reforged/releases/tag/continuous) do not include this fork’s changes:
 
 | Platform | Download | Instructions |
 |---|---|---|
@@ -69,9 +69,9 @@ Then restart your terminal or run `source ~/.bashrc`.
 ### Step 3: Clone and install RuneKit Reforged
 
 ```sh
-git clone https://github.com/Jcapehart2/RuneKit-Reforged.git
+git clone https://github.com/iain801/RuneKit-Reforged.git
 cd RuneKit-Reforged
-poetry install
+poetry install --extras gpu
 ```
 
 This creates a virtual environment and installs all Python dependencies. It may take a minute.
@@ -91,7 +91,7 @@ poetry run make dev
 poetry run python main.py
 ```
 
-3. A **system tray icon** will appear in your panel (top-right area)
+3. A **system tray icon** will appear in your panel
 4. **Right-click the tray icon** to see available Alt1 apps
 5. On first launch, RuneKit downloads the default app list from runeapps.org
 
@@ -103,13 +103,13 @@ After initial setup, you can use the included launcher script:
 ./RuneKit.sh
 ```
 
-This script checks for dependencies and launches RuneKit. You can double-click it in your file manager too (make sure it's marked executable with `chmod +x RuneKit.sh`).
+This script checks system dependencies, installs Python dependencies including the GPU extra, builds Qt resources, and launches RuneKit. You can double-click it in your file manager too (make sure it's marked executable with `chmod +x RuneKit.sh`).
 
 ---
 
 ## macOS Quick Start (Building from Source)
 
-> **Note:** Mac support is experimental. If you just want to try it, download the [pre-built app](#download) instead.
+> **Note:** Mac support is experimental. If you just want to try it, the [upstream pre-built app](#download) is available, but does not include this fork’s changes.
 
 ### Step 1: Install Homebrew dependencies
 
@@ -120,7 +120,7 @@ brew install python@3.13 poetry
 ### Step 2: Clone and install
 
 ```sh
-git clone https://github.com/Jcapehart2/RuneKit-Reforged.git
+git clone https://github.com/iain801/RuneKit-Reforged.git
 cd RuneKit-Reforged
 poetry install
 ```
@@ -179,7 +179,7 @@ Or add apps through the Settings UI:
 ### "No game instance found"
 
 - Make sure RuneScape 3 is **running** before you start RuneKit
-- RuneKit looks for a window named "RuneScape". If your window has a different name, set:
+- RuneKit detects the game by its window class, or its title and client process. To override the expected window name, set:
   ```sh
   export RK_WM_APP_NAME="YourWindowName"
   ```
@@ -201,13 +201,13 @@ Or add apps through the Settings UI:
 
 ### "GBM is not supported" / Vulkan fallback
 
-- This is normal — Qt WebEngine falls back to Vulkan rendering. Everything works fine.
+- On the tested NVIDIA setup, Qt WebEngine uses Vulkan rendering when GBM is unavailable. This message alone does not indicate a capture failure.
 
 ---
 
 ## Bug Reports
 
-If something isn't working, please open a GitHub Issue and **include your log file**.
+For issues reproducible in upstream RuneKit Reforged, open an upstream GitHub Issue and **include your log file**.
 
 RuneKit automatically saves logs to:
 
@@ -221,7 +221,7 @@ Logs rotate automatically (3 files, 1MB each) so they won't fill your disk.
 
 1. Reproduce the issue
 2. Find your log file (see path above)
-3. Open a [GitHub Issue](https://github.com/Jcapehart2/RuneKit-Reforged/issues/new) with:
+3. Open an [upstream GitHub Issue](https://github.com/Jcapehart2/RuneKit-Reforged/issues/new) with:
    - What you were doing when it broke
    - Your distro and desktop environment (e.g., "Ubuntu 24.04, GNOME on X11")
    - Attach or paste your `runekit.log` file
@@ -285,8 +285,6 @@ with `RUNEKIT_OPENCL_TESTS=1` when running the development test suite.
 
 Set `RUNEKIT_OPENCL=0` to use the CPU matcher and skip installing the GPU extra.
 Missing GPU dependencies or an unavailable GPU automatically fall back to CPU.
-This replaces the earlier OpenCV mask-only GPU
-experiment, which increased total CPU usage despite lower search latency.
 
 ---
 
@@ -302,7 +300,6 @@ poetry run make dist/RuneKit.AppImage
 
 The codebase includes macOS support inherited from the original RuneKit project, but it has **not been tested** since the Qt6 migration. Things may be broken.
 
-- The maintainer does not have a Mac, so issues can't be diagnosed without your help
 - If something doesn't work, please [open a GitHub Issue](https://github.com/Jcapehart2/RuneKit-Reforged/issues/new) with details about what happened and your macOS version
 - Contributions and pull requests for macOS fixes are very welcome
 
