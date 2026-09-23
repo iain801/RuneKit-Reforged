@@ -1,6 +1,7 @@
 import logging
 import os
 import struct
+import threading
 from typing import List, Dict, Tuple, Union
 
 import sysv_ipc
@@ -9,7 +10,7 @@ import xcffib.composite
 import xcffib.shm
 import xcffib.xinput
 import xcffib.xproto
-from PySide6.QtCore import QThread, Slot, QObject, Signal
+from PySide6.QtCore import QTimer, Slot, QObject, Signal
 
 from runekit.game import GameManager
 from .instance import GameInstance, X11GameInstance
@@ -35,10 +36,12 @@ class X11GameManager(GameManager):
     _shm: List[Tuple[int, sysv_ipc.SharedMemory]]
 
     def __init__(self, **kwargs):
-        super().__init__(*kwargs)
+        super().__init__(**kwargs)
         self._instances = {}
         self._atom = {}
         self._shm = []
+        self.capture_lock = threading.RLock()
+        self._stopped = False
 
         self.logger = logging.getLogger(__name__ + "." + self.__class__.__name__)
         self.connection = xcffib.Connection()
@@ -49,41 +52,53 @@ class X11GameManager(GameManager):
         self._setup_composite()
         self._setup_overlay()
 
-        self.event_thread = QThread(self)
-
         self.event_worker = X11EventWorker(self)
-        self.event_worker.moveToThread(self.event_thread)
-        self.event_thread.started.connect(self.event_worker.run)
-        self.event_thread.finished.connect(self.event_worker.deleteLater)
         self.event_worker.create_signal.connect(self.on_game_opened)
         self.event_worker.destroy_signal.connect(self.on_game_closed)
-
-        self.event_thread.start()
-
-        self.get_instances()
+        self.event_timer = QTimer(self)
+        self.event_timer.timeout.connect(self.event_worker.poll_events)
+        self.event_timer.start(10)
+        # Window titles and classes are often set after CreateNotify.
+        self.discovery_timer = QTimer(self)
+        self.discovery_timer.timeout.connect(self.get_instances)
+        self.discovery_timer.start(1000)
+        try:
+            self.event_worker.select_events()
+            self.get_instances()
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self):
-        self.event_thread.requestInterruption()
-        self.event_thread.quit()
-        self.event_thread.wait()
+        if self._stopped:
+            return
+        self.event_timer.stop()
+        self.discovery_timer.stop()
+        with self.capture_lock:
+            self._stopped = True
+            for instance in list(self._instances.values()):
+                instance.close()
+            self._instances.clear()
+            self.gc_shm(limit=0)
+            self.connection.disconnect()
+        self.overlay.hide()
+        self.overlay.deleteLater()
 
     def get_instances(self) -> List[GameInstance]:
-        def visit(wid: int):
-            if self.is_game(wid):
-                if wid not in self._instances:
-                    self.logger.info("Found game instance %d", wid)
-                    instance = X11GameInstance(self, wid, parent=self)
-                    self._instances[wid] = instance
+        if self._stopped:
+            return []
 
+        def visit(wid: int):
             try:
-                query = self.connection.core.QueryTree(wid).reply()
-                for child in query.children:
+                if wid not in self._instances and self.is_game(wid):
+                    self.on_game_opened(wid)
+                for child in self.connection.core.QueryTree(wid).reply().children:
                     visit(child)
-            except xcffib.xproto.WindowError:
+            except (xcffib.xproto.WindowError, xcffib.xproto.DrawableError):
+                # A client can disappear between any two X11 requests.
                 return
 
         visit(self.screen.root)
-
         return list(self._instances.values())
 
     def get_active_instance(self) -> Union[GameInstance, None]:
@@ -101,15 +116,24 @@ class X11GameManager(GameManager):
             geom_req.discard_reply()
             return False
 
-        geom = geom_req.reply()
+        try:
+            geom = geom_req.reply()
+            attrs = self.connection.core.GetWindowAttributes(wid).reply()
+        except (xcffib.xproto.WindowError, xcffib.xproto.DrawableError):
+            return False
+        if attrs.map_state != xcffib.xproto.MapState.Viewable:
+            return False
         if geom.width == 32 and geom.height == 32:
             # OpenGL test window
             return False
 
-        if not wm_class:
+        if not isinstance(wm_class, str) or not wm_class:
             return False
 
-        instance_name, app_name = wm_class.split("\00")
+        parts = wm_class.split("\00")
+        if len(parts) < 2:
+            return False
+        app_name = parts[1]
 
         if app_name == WM_APP_NAME:
             return True
@@ -158,7 +182,7 @@ class X11GameManager(GameManager):
         self.overlay.check_compatibility()
 
     def _setup_composite(self):
-        self.xcomposite.QueryVersion(0, 4, is_checked=True)
+        self.xcomposite.QueryVersion(0, 4).reply()
 
     def get_property(
         self,
@@ -177,12 +201,15 @@ class X11GameManager(GameManager):
             max_values,
         ).reply()
 
+        if not reply.type:
+            return None
         if reply.type == xcffib.xproto.Atom.STRING:
-            return reply.value.to_string()[:-1]
+            return reply.value.to_string().rstrip("\0")
         elif reply.type == self.get_atom("UTF8_STRING"):
             return reply.value.to_utf8()
         elif reply.type in (xcffib.xproto.Atom.WINDOW, xcffib.xproto.Atom.CARDINAL):
-            return struct.unpack("=I", reply.value.buf()[:4])[0]
+            data = bytes(reply.value.buf())
+            return struct.unpack("=I", data[:4])[0] if len(data) >= 4 else None
 
         return reply.value
 
@@ -211,43 +238,57 @@ class X11GameManager(GameManager):
 
         shm = sysv_ipc.SharedMemory(None, flags=sysv_ipc.IPC_CREX, size=size)
         xid = self.connection.generate_id()
-        self.xshm.Attach(xid, shm.id, False, is_checked=True)
+        try:
+            self.xshm.Attach(xid, shm.id, False, is_checked=True).check()
+            # Both processes are attached now; remove automatically after the
+            # final detach, even if RuneKit exits unexpectedly.
+            shm.remove()
+        except Exception:
+            shm.detach()
+            shm.remove()
+            raise
         return xid, shm
 
     def free_shm(self, shm: Tuple[int, sysv_ipc.SharedMemory]):
         self._shm.append(shm)
         self.gc_shm()
 
-    def gc_shm(self):
-        while len(self._shm) > MAX_SHM:
+    def gc_shm(self, limit=MAX_SHM):
+        while len(self._shm) > limit:
             xid, shm = self._shm.pop(0)
             self.xshm.Detach(xid)
             shm.detach()
-            shm.remove()
 
-    @Slot(xcffib.Event)
-    def on_game_opened(self, evt: xcffib.xproto.CreateNotifyEvent):
-        self.logger.info("New game window opened %d", evt.window)
-        self._instances[evt.window] = X11GameInstance(self, evt.window, parent=self)
+    @Slot(int)
+    def on_game_opened(self, wid: int):
+        if self._stopped or wid in self._instances:
+            return
+        try:
+            instance = X11GameInstance(self, wid, parent=self)
+        except xcffib.XcffibException:
+            self.logger.debug("Game window disappeared during discovery", exc_info=True)
+            return
+        self._instances[wid] = instance
+        self.instance_added.emit(instance)
+        self.instance_changed.emit()
 
     @Slot(int)
     def on_game_closed(self, wid: int):
-        if wid not in self._instances:
+        instance = self._instances.pop(wid, None)
+        if instance is None:
             return
-
-        self.logger.info("Game window %d closed", wid)
-        instance = self._instances[wid]
-        del self._instances[wid]
         self.instance_removed.emit(instance)
+        instance.close(window_destroyed=True)
+        instance.deleteLater()
         self.instance_changed.emit()
 
 
 class X11EventWorker(QObject):
-    create_signal = Signal(xcffib.Event)
+    create_signal = Signal(int)
     destroy_signal = Signal(int)
 
     def __init__(self, manager: "X11GameManager", **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(parent=manager, **kwargs)
         self.manager = manager
         self.logger = logging.getLogger(__name__ + "." + self.__class__.__name__)
 
@@ -255,14 +296,14 @@ class X11EventWorker(QObject):
             xcffib.xproto.PropertyNotifyEvent: self.on_property_change,
             xcffib.xproto.ConfigureNotifyEvent: self.on_configure_event,
             xcffib.xproto.KeyPressEvent: self.on_input_event,
-            xcffib.xproto.ButtonPressEvent: self.on_input_event,
-            xcffib.xproto.CreateNotifyEvent: self.on_create,
+            xcffib.xinput.RawButtonPressEvent: self.on_mouse_input,
+            xcffib.xproto.MapNotifyEvent: self.on_map,
+            xcffib.xproto.UnmapNotifyEvent: self.on_unmap,
             xcffib.xproto.DestroyNotifyEvent: self.on_destroy,
         }
         self.active_win_id = self.manager.get_active_window()
 
-    @Slot()
-    def run(self):
+    def select_events(self):
         self.manager.connection.core.ChangeWindowAttributesChecked(
             self.manager.screen.root,
             xcffib.xproto.CW.EventMask,
@@ -271,30 +312,50 @@ class X11EventWorker(QObject):
                 | xcffib.xproto.EventMask.SubstructureNotify,
             ],
         ).check()
-        current_thread = QThread.currentThread()
+        self.manager.xinput.XIQueryVersion(2, 1).reply()
+        mask = xcffib.xinput.EventMask.synthetic(
+            xcffib.xinput.Device.AllMaster,
+            1,
+            [xcffib.xinput.XIEventMask.RawButtonPress],
+        )
+        self.manager.xinput.XISelectEvents(
+            self.manager.screen.root, 1, [mask], is_checked=True
+        ).check()
 
-        while True:
-            if current_thread.isInterruptionRequested():
-                return
-
-            evt = self.manager.connection.poll_for_event()
-            if evt is None:
-                QThread.msleep(10)
-                continue
-
-            for wanted_type, handler in self.handlers.items():
-                if isinstance(evt, wanted_type):
-                    try:
+    @Slot()
+    def poll_events(self):
+        for _ in range(100):
+            try:
+                evt = self.manager.connection.poll_for_event()
+                if evt is None:
+                    break
+                for event_type, handler in self.handlers.items():
+                    if isinstance(evt, event_type):
                         handler(evt)
-                    except:
-                        self.logger.error(
-                            "Error handling event %s", repr(evt), exc_info=True
-                        )
+                        break
+            except xcffib.XcffibException:
+                self.logger.debug(
+                    "X11 window changed during event handling", exc_info=True
+                )
+        self.manager.connection.flush()
+
+    def on_mouse_input(self, evt):
+        active = self.manager.get_active_window()
+        instance = self.manager._instances.get(active)
+        if instance is None:
+            return
+        pointer = self.manager.connection.core.QueryPointer(instance.wid).reply()
+        geometry = self.manager.connection.core.GetGeometry(instance.wid).reply()
+        if (
+            pointer.same_screen
+            and 0 <= pointer.win_x < geometry.width
+            and 0 <= pointer.win_y < geometry.height
+        ):
+            instance.game_activity.emit()
 
     def on_property_change(self, evt: xcffib.xproto.PropertyNotifyEvent):
         if (
-            evt.state == xcffib.xproto.Property.NewValue
-            and evt.atom == self.manager.get_atom(NET_ACTIVE_WINDOW)
+            evt.atom == self.manager.get_atom(NET_ACTIVE_WINDOW)
             and evt.window == self.manager.screen.root
         ):
             active_win_id = self.manager.get_active_window()
@@ -309,31 +370,33 @@ class X11EventWorker(QObject):
 
                 if active != instance._is_focused:
                     instance._is_focused = active
-                    instance.focusChanged.emit(active)
+                    instance.focusChanged.emit(instance.is_focused())
 
     def on_input_event(
         self, evt: Union[xcffib.xproto.KeyPressEvent, xcffib.xproto.ButtonPressEvent]
     ):
         try:
-            self.manager._instances[evt.event].input_signal.emit(evt)
+            self.manager._instances[evt.event].on_input(evt)
         except KeyError:
             self.logger.debug("Got input event for %d but is not registered", evt.event)
 
     def on_configure_event(self, evt: xcffib.xproto.ConfigureNotifyEvent):
         try:
-            self.manager._instances[evt.window].config_signal.emit(evt)
+            self.manager._instances[evt.window].on_config(evt)
         except KeyError:
             pass
 
-    def on_create(self, evt: xcffib.xproto.CreateNotifyEvent):
-        if evt.window in self.manager._instances:
-            return
+    def on_map(self, evt):
+        instance = self.manager._instances.get(evt.window)
+        if instance is not None:
+            instance.on_config(evt)
+        elif self.manager.is_game(evt.window):
+            self.create_signal.emit(evt.window)
 
-        # At this point we aren't sure if it's actually the game...
-        if not self.manager.is_game(evt.window):
-            return
-
-        self.create_signal.emit(evt)
+    def on_unmap(self, evt):
+        instance = self.manager._instances.get(evt.window)
+        if instance is not None:
+            instance.set_mapped(False)
 
     def on_destroy(self, evt: xcffib.xproto.DestroyNotifyEvent):
         if evt.window in self.manager._instances:

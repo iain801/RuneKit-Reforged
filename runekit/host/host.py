@@ -21,10 +21,11 @@ class Host:
 
     open_app: List[App]
 
-    def __init__(self, manager: "GameManager"):
+    def __init__(self, manager: "GameManager", game_index=None):
         super().__init__()
         self.logger = logging.getLogger(__name__ + "." + self.__class__.__name__)
         self.manager = manager
+        self.game_index = game_index
         self.open_app = []
         self.notifier = AutoNotifier()
         self.app_store = AppStore()
@@ -38,7 +39,8 @@ class Host:
         self.manager.instance_removed.connect(self.on_game_quit)
 
     def on_before_quit(self):
-        for app in self.open_app:
+        self.app_store.stop()
+        for app in self.open_app[:]:
             app.close()
 
     def __del__(self):
@@ -64,7 +66,9 @@ class Host:
         self.launch_app(appid, manifest)
 
     def launch_app(self, appid: str, manifest: AppManifest):
-        instance = self.manager.get_active_instance()
+        instance = (
+            self.manager.get_active_instance() if self.game_index is None else None
+        )
 
         if not instance:
             instances = self.manager.get_instances()
@@ -76,7 +80,15 @@ class Host:
                 )
                 return
 
-            instance = instances[0]
+            index = self.game_index or 0
+            if index >= len(instances):
+                QMessageBox.critical(
+                    None,
+                    "Game instance missing",
+                    f"Game index {index} is not available; found {len(instances)} instance(s).",
+                )
+                return
+            instance = instances[index]
 
         app = App(
             host=self,

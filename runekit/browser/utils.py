@@ -2,6 +2,7 @@ import base64
 from typing import TypeVar
 
 import numpy as np
+import cv2
 from PIL import Image
 from PySide6.QtGui import QColor
 
@@ -16,7 +17,7 @@ class ApiPermissionDeniedException(Exception):
 
     def __init__(self, required_permission: str):
         super().__init__(
-            "Permission '%s' is needed for this action".format(required_permission)
+            f"Permission '{required_permission}' is needed for this action"
         )
         self.required_permission = required_permission
 
@@ -27,7 +28,11 @@ ImgTypeG = TypeVar("T", np.ndarray, Image.Image)
 def ensure_image_rgba(image: ImgTypeG) -> ImgTypeG:
     # XXX: This function is not idempotent!
     if isinstance(image, np.ndarray):
-        return image[:, :, [2, 1, 0, 3]]
+        # Produce interleaved, contiguous pixels directly. NumPy fancy indexing
+        # otherwise leaves a strided array that is expensive to serialize.
+        if image.size == 0:
+            return image.copy()
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
     else:
         if image.mode == "RGB":
             image = image.convert("RGBA")

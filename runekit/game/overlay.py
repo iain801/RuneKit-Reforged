@@ -1,16 +1,18 @@
 import logging
 from typing import TYPE_CHECKING, Callable, Tuple, Dict
 
-import numpy as np
 from PySide6.QtCore import Qt, QRect, QTimer
 from PySide6.QtGui import QGuiApplication, QPen
 from PySide6.QtWidgets import (
     QMainWindow,
+    QFrame,
     QGraphicsView,
     QGraphicsScene,
     QGraphicsItem,
     QGraphicsRectItem,
 )
+
+from shiboken6 import delete, isValid
 
 from .qt import qpixmap_to_np, is_wayland
 from ..image import is_color_percent_gte
@@ -35,31 +37,37 @@ class DesktopWideOverlay(QMainWindow):
         self.logger = logging.getLogger(__name__ + "." + self.__class__.__name__)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setStyleSheet("background: transparent")
         self._instances = {}
+        self._compatibility_timer = QTimer(self)
+        self._compatibility_timer.setSingleShot(True)
+        self._compatibility_timer.timeout.connect(self._check_compatibility)
 
-        virtual_screen = QRect(0, 0, 0, 0)
-
-        for screen in QGuiApplication.screens():
-            # TODO: Handle screen change
-            geom = screen.virtualGeometry()
-            virtual_screen = virtual_screen.united(geom)
-
-        self.scene = QGraphicsScene(
-            0, 0, virtual_screen.width(), virtual_screen.height(), parent=self
-        )
-
+        self.scene = QGraphicsScene(self)
         self.view = QGraphicsView(self.scene, self)
+        self.view.setFrameShape(QFrame.Shape.NoFrame)
+        self.view.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.view.setStyleSheet("background: transparent")
-        self.view.setGeometry(0, 0, virtual_screen.width(), virtual_screen.height())
         self.view.setInteractive(False)
+        self.setCentralWidget(self.view)
+        self.transparent_pen = QPen(Qt.PenStyle.NoPen)
+        app = QGuiApplication.instance()
+        app.screenAdded.connect(self._watch_screen)
+        app.screenRemoved.connect(self._update_geometry)
+        for screen in app.screens():
+            self._watch_screen(screen)
 
-        self.transparent_pen = QPen()
-        self.transparent_pen.setBrush(Qt.BrushStyle.NoBrush)
+    def _watch_screen(self, screen):
+        screen.geometryChanged.connect(self._update_geometry)
+        self._update_geometry()
 
+    def _update_geometry(self, *_):
+        virtual_screen = QRect()
+        for screen in QGuiApplication.screens():
+            virtual_screen = virtual_screen.united(screen.geometry())
+        self.scene.setSceneRect(virtual_screen)
         self.setGeometry(virtual_screen)
 
     def add_instance(
@@ -75,21 +83,22 @@ class DesktopWideOverlay(QMainWindow):
         instance_pos = instance.get_position()
         gfx = QGraphicsRectItem(0, 0, instance_pos.width(), instance_pos.height())
         gfx.setPen(self.transparent_pen)
+        gfx.setVisible(instance.is_focused())
         gfx.setPos(instance_pos.x(), instance_pos.y())
         self.scene.addItem(gfx)
         self._instances[instance.wid] = gfx
 
         def disconnect():
-            gfx.hide()
-            self.scene.removeItem(gfx)
+            self._instances.pop(instance.wid, None)
+            if isValid(gfx):
+                delete(gfx)
             instance.positionChanged.disconnect(positionChanged)
             instance.focusChanged.disconnect(focusChanged)
 
         return gfx, disconnect
 
     def on_instance_focus_change(self, instance, focus):
-        # self._instances[instance.wid].setVisible(focus)
-        pass
+        self._instances[instance.wid].setVisible(focus)
 
     def on_instance_moved(self, instance, pos: QRect):
         rect = self._instances[instance.wid]
@@ -97,7 +106,7 @@ class DesktopWideOverlay(QMainWindow):
         rect.setPos(pos.x(), pos.y())
 
     def check_compatibility(self):
-        QTimer.singleShot(300, self._check_compatibility)
+        self._compatibility_timer.start(300)
 
     def _check_compatibility(self):
         # If we cause black screen then hide ourself out of shame...

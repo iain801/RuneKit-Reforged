@@ -1,36 +1,30 @@
-#!/bin/bash
-# RuneKit Launcher
-# Double-click this file or run it from a terminal to start RuneKit
+#!/usr/bin/env bash
+# Install project dependencies, build Qt resources, and launch RuneKit.
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
 export PATH="$HOME/.local/bin:$PATH"
 
-# Check for required system library (Qt6 xcb platform plugin)
-if ! ldconfig -p 2>/dev/null | grep -q libxcb-cursor; then
-    echo "Installing required system library (libxcb-cursor0)..."
-    sudo apt install -y libxcb-cursor0
+if ! ldconfig -p 2>/dev/null | awk '/libxcb-cursor/{found=1} END{exit !found}'; then
+    echo "Missing Qt dependency: install xcb-util-cursor on CachyOS/Arch," >&2
+    echo "or libxcb-cursor0 on Debian/Ubuntu, then run this launcher again." >&2
+    exit 1
 fi
 
-# Check if poetry is installed
-if ! command -v poetry &>/dev/null; then
-    echo "Poetry not found. Installing via pipx..."
+if ! command -v poetry >/dev/null 2>&1; then
+    if ! command -v pipx >/dev/null 2>&1; then
+        echo "Install Poetry or pipx with your distribution's package manager first." >&2
+        exit 1
+    fi
     pipx install poetry
 fi
 
-# Check if dependencies are installed
-if [ ! -f "poetry.lock" ] || ! poetry env info -p &>/dev/null; then
-    echo "Installing dependencies..."
-    poetry install
+# An existing virtualenv may be incomplete or use an older lock file.
+if [[ "${RUNEKIT_OPENCL:-1}" != "0" ]]; then
+    poetry install --no-interaction --extras gpu
+else
+    poetry install --no-interaction
 fi
-
-# Build resources if needed
-if [ ! -f "runekit/_resources.py" ]; then
-    echo "Building resources..."
-    poetry run make runekit/_resources.py
-fi
-
-echo "Starting RuneKit..."
-echo "Logs: ~/.config/cupco.de/RuneKit/logs/runekit.log"
+poetry run make dev
 exec poetry run python main.py "$@"

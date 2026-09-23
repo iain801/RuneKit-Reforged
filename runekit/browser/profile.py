@@ -28,19 +28,26 @@ class WebProfile(QWebEngineProfile):
         self.settings().setAttribute(
             QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False
         )
-        self.settings().setAttribute(QWebEngineSettings.WebAttribute.PdfViewerEnabled, False)
-        self.settings().setAttribute(QWebEngineSettings.WebAttribute.ScreenCaptureEnabled, False)
-        self.settings().setAttribute(QWebEngineSettings.WebAttribute.AutoLoadIconsForPage, False)
+        self.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.PdfViewerEnabled, False
+        )
+        self.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.ScreenCaptureEnabled, False
+        )
+        self.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.AutoLoadIconsForPage, False
+        )
+
+    def stop_requests(self):
+        self.scheme_handler.stop()
 
     def _insert_scheme_handlers(self):
-        self.installUrlSchemeHandler(
-            RuneKitScheme.scheme,
-            RuneKitSchemeHandler(
-                rpc_secret=self.rpc_secret.encode("ascii"),
-                api=self.app.get_api(),
-                parent=self,
-            ),
+        self.scheme_handler = RuneKitSchemeHandler(
+            rpc_secret=self.rpc_secret.encode("ascii"),
+            api=self.app.get_api(),
+            parent=self,
         )
+        self.installUrlSchemeHandler(RuneKitScheme.scheme, self.scheme_handler)
 
     def _insert_alt1_api(self):
         qwc_file = QFile(":/qtwebchannel/qwebchannel.js", parent=self)

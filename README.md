@@ -25,11 +25,11 @@ Pre-built binaries are available from the [continuous release](https://github.co
 
 | Requirement | Details |
 |---|---|
-| **OS** | Linux (X11) — primary target |
+| **OS** | Linux with X11 or XWayland |
 | **macOS** | macOS 14+ (experimental, untested — Accessibility + Screen Recording permissions required) |
 | **Python** | 3.11, 3.12, 3.13, or 3.14 |
 | **RuneScape 3** | Official client must be **running** before you start RuneKit |
-| **Display server** | X11 required on Linux (Wayland is not supported) |
+| **Display server** | X11, or a Wayland session with the game running through XWayland |
 
 ---
 
@@ -191,8 +191,9 @@ Or add apps through the Settings UI:
 
 ### Black screen / overlay issues
 
-- RuneKit requires **X11**. If you're on Wayland, switch to an X11 session at the login screen
-- Or run with XWayland: `QT_QPA_PLATFORM=xcb poetry run python main.py`
+- On Wayland, RuneKit selects Qt's `xcb` backend automatically. The game must also expose an X11/XWayland window; native Wayland game windows cannot be captured by this backend.
+- The native Linux RuneScape client launched through Bolt was verified on CachyOS/Plasma Wayland with one display at 100% scale. Mixed-scale and multi-monitor layouts still need live testing.
+- If game detection fails, check `xprop` against the game window. Start RuneScape before opening an Alt1 app.
 
 ### "Failed to load module xapp-gtk3-module"
 
@@ -238,11 +239,54 @@ poetry run python main.py settings
 
 ## Debugging
 
-Enable the Chromium remote debugger:
+Close RuneKit, then enable the Chromium profiler on the next launch:
 ```sh
-poetry run python main.py --remote-debugging-port=9222
+./RuneKit.sh --devtools-port 9222
 ```
-Then open `chrome://inspect` in Chrome/Chromium to debug Alt1 apps.
+For an already installed development environment, use
+`poetry run python main.py --devtools-port 9222` instead.
+
+Open Clue Trainer from RuneKit, then visit `http://127.0.0.1:9222` in
+Chrome/Chromium and select its page. In **Performance**, record 15–30 seconds
+while reproducing the expensive activity, stop recording, and save the profile.
+Record idle and active clue solving separately. Use **Memory** for heap snapshots
+if investigating growth over time.
+
+This profiles the embedded browser's JavaScript and rendering. Python screen
+capture and X11 polling run in the host process and require a separate Python
+profiler. GPU acceleration is already enabled by Qt when available; enabling
+DevTools does not change the rendering backend. The debugging endpoint binds to
+localhost and is disabled by default (unless configured through the environment).
+See [Qt WebEngine debugging](https://doc.qt.io/qt-6.10/qtwebengine-debugging.html).
+
+Add `--debug` for verbose RuneKit logs, including capture requests. Leave it off
+when measuring normal overhead, since tracing adds logging work to each request.
+
+RuneKit implements `bindFindSubImg` on bound capture snapshots. Clue Trainer
+automatically uses this native image-search path, returning coordinates instead
+of transferring the search image into JavaScript. Matching preserves the Alt1
+JavaScript fallback's alpha-weighted RGB tolerance, row order, and 51-match cap.
+Restart RuneKit after updating to load changes to its injected browser API.
+
+Large native image searches use a dedicated PyOpenCL backend by default when available.
+RuneKit uploads each bound snapshot once, filters and verifies candidates on
+the GPU, and collects the first 51 matches in row order on the GPU. Only a
+208-byte result buffer is downloaded per search. Small searches and systems
+without a compatible GPU use the CPU path. Launch normally:
+
+```sh
+./RuneKit.sh
+```
+
+The launcher installs the `gpu` dependency extra by default.
+For a development environment, use `poetry install --extras gpu`, then
+`poetry run python main.py`. Include live GPU correctness checks
+with `RUNEKIT_OPENCL_TESTS=1` when running the development test suite.
+
+Set `RUNEKIT_OPENCL=0` to use the CPU matcher and skip installing the GPU extra.
+Missing GPU dependencies or an unavailable GPU automatically fall back to CPU.
+This replaces the earlier OpenCV mask-only GPU
+experiment, which increased total CPU usage despite lower search latency.
 
 ---
 
@@ -279,3 +323,24 @@ This project is [licensed](LICENSE) under GPLv3, and contains code from [third p
 Contains code from the Alt1 application.
 
 Please do not contact Alt1 or RuneApps.org for support with RuneKit Reforged.
+
+## Development checks
+
+```bash
+poetry install
+poetry run make dev
+poetry run python -m unittest discover -s tests -v
+```
+
+To include live X11/XWayland checks, which briefly create test windows:
+
+```bash
+RUNEKIT_X11_TESTS=1 QT_QPA_PLATFORM=xcb poetry run python -m unittest discover -s tests -v
+```
+
+With RuneScape running, test browser capture, page reload, and closing with
+requests in flight using temporary settings:
+
+```bash
+poetry run python tests/smoke_browser.py
+```

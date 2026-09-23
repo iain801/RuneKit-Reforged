@@ -7,29 +7,19 @@ if TYPE_CHECKING:
 
 
 def np_crop(image: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
-    shape = image.shape
-    img_width = shape[1]
-    img_height = shape[0]
-    if w is None:
-        w = img_width
-    if h is None:
-        h = img_height
-
-    x_pad_left = max(0, -x)
-    y_pad_left = max(0, -y)
-
-    x1 = max(0, x)
-    y1 = max(0, y)
-    x2 = min(x1 + w - x_pad_left, img_width - x_pad_left)
-    y2 = min(y1 + h - y_pad_left, img_height - y_pad_left)
-    image = image[y1:y2, x1:x2]
-
-    x_pad = (x_pad_left, w - (x2 - x1) - x_pad_left)
-    y_pad = (y_pad_left, h - (y2 - y1) - y_pad_left)
-    if x_pad != (0, 0) or y_pad != (0, 0):
-        image = np.pad(image, (y_pad, x_pad, (0, 0)))
-
-    return image
+    img_height, img_width = image.shape[:2]
+    w = img_width if w is None else w
+    h = img_height if h is None else h
+    if w < 0 or h < 0:
+        raise ValueError("Capture dimensions cannot be negative")
+    x1, y1 = max(0, x), max(0, y)
+    x2, y2 = min(img_width, x + w), min(img_height, y + h)
+    if x1 == x and y1 == y and x2 == x + w and y2 == y + h:
+        return image[y1:y2, x1:x2]
+    out = np.zeros((h, w, *image.shape[2:]), dtype=image.dtype)
+    if x2 > x1 and y2 > y1:
+        out[y1 - y : y2 - y, x1 - x : x2 - x] = image[y1:y2, x1:x2]
+    return out
 
 
 def np_save_image(image: np.ndarray, out: str):

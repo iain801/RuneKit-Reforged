@@ -187,7 +187,7 @@ class InterfacePage(QWidget):
         border_field = QCheckBox("Styled window border", self)
         border_field.setDisabled(sys.platform == "darwin")
         border_field.setChecked(
-            (self.settings.value("settings/styledBorder", "true") == "true")
+            self.settings.value("settings/styledBorder", True, type=bool)
             and sys.platform != "darwin"
         )
         border_field.stateChanged.connect(self.on_change_styled_border)

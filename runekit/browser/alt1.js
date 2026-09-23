@@ -349,9 +349,9 @@
         // bindGetPixel(id, x, y) {
         //     return -1;
         // },
-        // bindFindSubImg(id, imgstr, imgwidth, x, y, w, h) {
-        //     return '';
-        // },
+        bindFindSubImg(id, imgstr, imgwidth, x, y, w, h) {
+            return syncRpc({func: 'bindFindSubImg', id, imgstr, imgwidth, x, y, w, h});
+        },
         capture(x, y, w, h) {
             let data = syncRpc({func: 'getRegionRaw', x: x, y: y, w: w, h: h});
             return str2ab(data);

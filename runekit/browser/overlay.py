@@ -1,7 +1,6 @@
 import sys
 import collections
 import functools
-import hashlib
 import logging
 from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
 
@@ -16,6 +15,8 @@ from PySide6.QtWidgets import (
     QGraphicsLineItem,
     QGraphicsPixmapItem,
 )
+
+from shiboken6 import delete, isValid
 
 from .utils import decode_color
 
@@ -32,7 +33,7 @@ def barrier(f):
 
 def ensure_overlay(f):
     def out(self: "OverlayApi", *args, **kwargs):
-        if not self.overlay_area:
+        if self.overlay_area is None or not isValid(self.overlay_area):
             return
 
         return f(self, *args, **kwargs)
@@ -53,6 +54,10 @@ class OverlayApi(QObject):
         super().__init__(**kwargs)
         self.logger = logging.getLogger(__name__)
         self.api = base_api
+        self._timers = {}
+        self._queue_timer = QTimer(self)
+        self._queue_timer.setSingleShot(True)
+        self._queue_timer.timeout.connect(self.process_queue)
         self.reset()
 
         try:
@@ -73,7 +78,7 @@ class OverlayApi(QObject):
         self.queue.sort(key=lambda x: x[0])
         # self.logger.debug("%d %s %s", call_id, command, repr(args))
 
-        QTimer.singleShot(0, self.process_queue)
+        self._queue_timer.start(0)
 
     def process_queue(self):
         while len(self.queue) > 0:
@@ -113,26 +118,39 @@ class OverlayApi(QObject):
             self.groups[group].append(gfx)
             gfx.setParentItem(self.overlay_area)
 
-        def hide():
-            try:
-                gfx.scene().removeItem(gfx)
-            except AttributeError:
-                pass
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._remove_gfx(gfx, group))
+        self._timers[gfx] = timer
+        timer.start(timeout)
 
-            try:
-                self.groups[group].remove(gfx)
-            except (KeyError, ValueError):
-                pass
-
-        QTimer.singleShot(timeout, hide)
+    def _remove_gfx(self, gfx, group=None):
+        if isValid(gfx):
+            for child in gfx.childItems():
+                self._remove_gfx(child)
+        timer = self._timers.pop(gfx, None)
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+        if group is not None and gfx in self.groups.get(group, []):
+            self.groups[group].remove(gfx)
+        if isValid(gfx):
+            delete(gfx)
 
     def reset(self):
-        if hasattr(self, "groups"):
-            for item in self.groups.values():
-                item.scene().removeItem(item)
-
+        self._queue_timer.stop()
+        for timer in self._timers.values():
+            timer.stop()
+            timer.deleteLater()
+        self._timers.clear()
+        for items in getattr(self, "groups", {}).values():
+            for gfx in items:
+                self._remove_gfx(gfx)
+        for gfx in getattr(self, "frozen_group", {}).values():
+            self._remove_gfx(gfx)
         self.groups = collections.defaultdict(list)
         self.frozen_group = {}
+        self.current_group = ""
         self.queue = []
         self.last_call_id = None
 
@@ -144,13 +162,11 @@ class OverlayApi(QObject):
     @barrier
     @ensure_overlay
     def overlay_clear_group(self, name: str):
-        for item in self.groups.get(name, []):
-            item.scene().removeItem(item)
-
-        try:
-            del self.groups[name]
-        except KeyError:
-            pass
+        for item in self.groups.pop(name, []):
+            self._remove_gfx(item)
+        frozen = self.frozen_group.pop(name, None)
+        if frozen is not None:
+            self._remove_gfx(frozen)
 
     @barrier
     @ensure_overlay
@@ -266,5 +282,7 @@ class OverlayApi(QObject):
 
     @functools.lru_cache(100)
     def get_qimage(self, img: bytes, width: int):
-        height = len(img) / width / 4
-        return QImage(img, width, height, QImage.Format.Format_ARGB32)
+        if width <= 0 or not img or len(img) % (width * 4):
+            raise ValueError("Overlay image must contain complete BGRA rows")
+        height = len(img) // (width * 4)
+        return QImage(img, width, height, QImage.Format.Format_ARGB32).copy()

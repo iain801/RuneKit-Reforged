@@ -78,7 +78,7 @@ class BrowserWindow(GameSnapMixin, QMainWindow):
         self.browser.setPage(self.get_page())
 
     def get_page(self) -> QWebEnginePage:
-        page = self.page_class(self.app.get_web_profile(), self.browser)
+        page = self.page_class(self.app.get_web_profile(parent=self), self.browser)
         page.setWebChannel(Alt1WebChannel(app=self.app, parent=self.browser))
         page.geometryChangeRequested.connect(self.on_geometry_change)
         page.iconChanged.connect(self.on_icon_changed)
@@ -106,10 +106,10 @@ class BrowserWindow(GameSnapMixin, QMainWindow):
             self.browser.page().setFeaturePermission(
                 origin, feature, QWebEnginePage.PermissionPolicy.GrantedByUser
             )
-        elif (
-            feature in (QWebEnginePage.Feature.DesktopVideoCapture, QWebEnginePage.Feature.DesktopAudioVideoCapture)
-            and self.app.has_permission('pixel')
-        ):
+        elif feature in (
+            QWebEnginePage.Feature.DesktopVideoCapture,
+            QWebEnginePage.Feature.DesktopAudioVideoCapture,
+        ) and self.app.has_permission("pixel"):
             self.browser.page().setFeaturePermission(
                 origin, feature, QWebEnginePage.PermissionPolicy.GrantedByUser
             )

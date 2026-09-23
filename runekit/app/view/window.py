@@ -19,7 +19,11 @@ class AppWindow(BrowserWindow):
         self.settings.setParent(self)
 
         # TODO: Hide from taskbar/group this as part of one big window?
-        flags = Qt.WindowType.NoDropShadowWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Window
+        flags = (
+            Qt.WindowType.NoDropShadowWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Window
+        )
         if self.framed:
             flags |= Qt.WindowType.CustomizeWindowHint
         self.setWindowFlags(flags)
@@ -42,9 +46,16 @@ class AppWindow(BrowserWindow):
         if self.app_icon:
             self.setWindowIcon(self.app_icon)
 
+    def closeEvent(self, event):
+        self.app.close()
+        super().closeEvent(event)
+
     @property
     def framed(self) -> bool:
-        return self.settings.value("settings/styledBorder", "true") == "true" and sys.platform != "darwin"
+        return (
+            self.settings.value("settings/styledBorder", True, type=bool)
+            and sys.platform != "darwin"
+        )
 
     def minimumSize(self) -> QSize:
         return QSize(self.app.manifest["minWidth"], self.app.manifest["minHeight"])

@@ -1,5 +1,4 @@
 import sys
-import traceback
 from pathlib import Path
 import json
 import logging
@@ -15,6 +14,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
     QStandardPaths,
+    Qt,
 )
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QProgressDialog, QMessageBox
@@ -37,8 +37,7 @@ class _FetchRegistryThread(QThread):
     items = Signal(int)
     label = Signal(str)
     failed = Signal(tuple)
-
-    canceled = False
+    app_ready = Signal(str, dict, str, bytes)
 
     def __init__(
         self,
@@ -53,51 +52,52 @@ class _FetchRegistryThread(QThread):
             apps_manifest, apps
         )
 
-        self.appstore = parent
         self.apps_manifest = apps_manifest
         self.apps = apps
+        self.succeeded = False
+        self.canceled = False
 
     def run(self):
         try:
-            progress_extra = 0
-            if self.apps_manifest:
-                apps = fetch_bom_json(REGISTRY_URL)
-                self.items.emit(len(apps) + 1)
-                self.progress.emit(1)
-                progress_extra = 1
-            else:
-                apps = self.apps
-                self.items.emit(len(apps))
-
+            apps = (
+                fetch_bom_json(self.apps_manifest) if self.apps_manifest else self.apps
+            )
+            self.items.emit(len(apps))
+            failed = False
             for index, app in enumerate(apps):
-                if type(app) == str:
-                    self.label.emit(f"Installing app {app}")
-                    self.add_app(app)
-                else:
-                    self.label.emit(f"Installing {app['name']}")
-                    url = urljoin(REGISTRY_URL, app["url"])
-                    self.add_app(url, app["folder"])
-
-                self.progress.emit(index + progress_extra + 1)
-
-                if self.canceled:
+                if self.isInterruptionRequested() or self.canceled:
                     return
-        finally:
-            self.items.emit(100)
-            self.progress.emit(100)
-
-    def add_app(self, url, folder=""):
-        try:
-            manifest = fetch_bom_json(url)
-            self.appstore.add_app(url, manifest)
-            self.appstore.add_app_to_folder(app_id(url), folder)
-        except:
-            logger.warning("Unable to add application %s", url, exc_info=True)
+                url = (
+                    app
+                    if isinstance(app, str)
+                    else urljoin(self.apps_manifest, app["url"])
+                )
+                folder = "" if isinstance(app, str) else app.get("folder", "")
+                self.label.emit(f"Installing app {url}")
+                try:
+                    manifest = fetch_bom_json(url)
+                    icon = b""
+                    if manifest.get("iconUrl"):
+                        response = requests.get(
+                            urljoin(url, manifest["iconUrl"]), timeout=15
+                        )
+                        response.raise_for_status()
+                        icon = response.content
+                    self.app_ready.emit(url, manifest, folder, icon)
+                except Exception:
+                    failed = True
+                    self.failed.emit(sys.exc_info())
+                self.progress.emit(index + 1)
+            self.succeeded = (
+                not failed and not self.canceled and not self.isInterruptionRequested()
+            )
+        except Exception:
             self.failed.emit(sys.exc_info())
 
     @Slot()
     def cancel(self):
         self.canceled = True
+        self.requestInterruption()
 
 
 class AppStore(QObject):
@@ -108,7 +108,9 @@ class AppStore(QObject):
         self.settings = QSettings(self)
 
         qt_write_base = Path(
-            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
+            QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppConfigLocation
+            )
         )
         qt_write_base.mkdir(parents=True, exist_ok=True)
 
@@ -116,63 +118,73 @@ class AppStore(QObject):
         self.icon_write_dir.mkdir(exist_ok=True)
 
     def has_default_apps(self) -> bool:
-        return self.settings.value("apps/_meta/isDefaultLoaded")
+        return self.settings.value("apps/_meta/isDefaultLoaded", False, type=bool)
 
     def load_default_apps(self):
-        def on_progress(value):
-            if value != self.app_progress.maximum():
-                return
-
-            self.settings.setValue("apps/_meta/isDefaultLoaded", True)
-            logger.info("Default apps loaded")
-            self.add_app_thread.progress.disconnect(on_progress)
-            del self.app_progress
-            del self.add_app_thread
-
-        self.app_progress = QProgressDialog("Loading default apps", "Cancel", 0, 100)
-
-        self.add_app_thread = _FetchRegistryThread(self, apps_manifest=REGISTRY_URL)
-        self.add_app_thread.progress.connect(self.app_progress.setValue)
-        self.add_app_thread.progress.connect(on_progress)
-        self.add_app_thread.items.connect(self.app_progress.setMaximum)
-        self.add_app_thread.label.connect(self.app_progress.setLabelText)
-        self.app_progress.canceled.connect(self.add_app_thread.cancel)
-        self.add_app_thread.start()
-
-        self.app_progress.show()
+        self._start_install(apps_manifest=REGISTRY_URL)
 
     def add_app_ui(self, manifests: List[str]):
-        def on_progress(value):
-            if value != self.app_progress.maximum():
-                return
+        self._start_install(apps=manifests)
 
-            self.add_app_thread.progress.disconnect(on_progress)
-            del self.app_progress
-            del self.add_app_thread
+    def _start_install(self, apps_manifest=None, apps=None):
+        if getattr(self, "add_app_thread", None) is not None:
+            self.app_progress.show()
+            return
+        progress = self.app_progress = QProgressDialog(
+            "Installing apps", "Cancel", 0, 0
+        )
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        worker = self.add_app_thread = _FetchRegistryThread(
+            self, apps_manifest=apps_manifest, apps=apps
+        )
+        errors = []
+
+        def on_ready(url, manifest, folder, icon):
+            try:
+                if "/" in folder:
+                    raise ValueError("Application folder must be a single name")
+                self.add_app(url, manifest, icon_data=icon)
+                self.add_app_to_folder(app_id(url), folder)
+            except Exception as exc:
+                errors.append(str(exc))
+                logger.exception("Failed to install %s", url)
 
         def on_failed(exc_info):
-            msg = QMessageBox(
-                QMessageBox.Icon.Critical,
-                "Fail to add application",
-                f"Failed to add application: \n\n{exc_info[0].__name__}: {exc_info[1]}",
-            )
-            msg.setDetailedText("".join(traceback.format_exception(*exc_info)))
-            msg.exec()
+            errors.append(str(exc_info[1]))
+            logger.warning("Application download failed: %s", exc_info[1])
 
-        self.app_progress = QProgressDialog("Installing app", "Cancel", 0, 100)
+        def on_finished():
+            if apps_manifest and worker.succeeded and not errors:
+                self.settings.setValue("apps/_meta/isDefaultLoaded", True)
+            progress.close()
+            progress.deleteLater()
+            worker.deleteLater()
+            self.add_app_thread = None
+            self.app_progress = None
+            if errors and not getattr(self, "_stopping", False):
+                QMessageBox.warning(
+                    None, "Application installation failed", "\n".join(errors)
+                )
 
-        self.add_app_thread = _FetchRegistryThread(self, apps=manifests)
-        self.add_app_thread.progress.connect(self.app_progress.setValue)
-        self.add_app_thread.progress.connect(on_progress)
-        self.add_app_thread.items.connect(self.app_progress.setMaximum)
-        self.add_app_thread.label.connect(self.app_progress.setLabelText)
-        self.add_app_thread.failed.connect(on_failed)
-        self.app_progress.canceled.connect(self.add_app_thread.cancel)
-        self.add_app_thread.start()
+        worker.app_ready.connect(on_ready, Qt.ConnectionType.QueuedConnection)
+        worker.failed.connect(on_failed, Qt.ConnectionType.QueuedConnection)
+        worker.progress.connect(progress.setValue)
+        worker.items.connect(progress.setMaximum)
+        worker.label.connect(progress.setLabelText)
+        worker.finished.connect(on_finished)
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+        progress.show()
 
-        self.app_progress.exec()
+    def stop(self):
+        self._stopping = True
+        worker = getattr(self, "add_app_thread", None)
+        if worker is not None:
+            worker.cancel()
+            worker.wait()
 
-    def add_app(self, manifest_url: str, manifest: AppManifest):
+    def add_app(self, manifest_url: str, manifest: AppManifest, icon_data=None):
         appid = app_id(manifest_url)
 
         try:
@@ -186,7 +198,10 @@ class AppStore(QObject):
         except KeyError:
             raise AddAppError(manifest_url)
 
-        if manifest["iconUrl"]:
+        if icon_data is not None:
+            if icon_data:
+                (self.icon_write_dir / (appid + ".png")).write_bytes(icon_data)
+        elif manifest["iconUrl"]:
             self.download_app_icon(appid, manifest["iconUrl"])
 
         self.settings.setValue(f"apps/{appid}", json.dumps(manifest))
@@ -285,7 +300,8 @@ class AppStore(QObject):
 
     def download_app_icon(self, appid: str, url: str):
         dest = self.icon_write_dir / (appid + ".png")
-        req = requests.get(url)
+        req = requests.get(url, timeout=15)
+        req.raise_for_status()
         with dest.open("wb") as fp:
             fp.write(req.content)
 
@@ -293,7 +309,8 @@ class AppStore(QObject):
 
     def icon(self, appid: str) -> Optional[QIcon]:
         fn = QStandardPaths.locate(
-            QStandardPaths.StandardLocation.AppConfigLocation, "app_icons/" + appid + ".png"
+            QStandardPaths.StandardLocation.AppConfigLocation,
+            "app_icons/" + appid + ".png",
         )
         if fn == "":
             return None
@@ -332,7 +349,10 @@ class AppStore(QObject):
 
     def __getitem__(self, item: str) -> AppManifest:
         assert not item.startswith("_")
-        return json.loads(self.settings.value(f"apps/{item}"))
+        value = self.settings.value(f"apps/{item}")
+        if value is None:
+            raise KeyError(item)
+        return json.loads(value)
 
 
 class AddAppError(ValueError):

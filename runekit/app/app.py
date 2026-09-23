@@ -29,18 +29,18 @@ class App:
 
     def close(self):
         from shiboken6 import isValid
-        if self.window and isValid(self.window):
-            self.window.deleteLater()
-            self.window = None
-        if self.alt1api and isValid(self.alt1api):
-            self.alt1api.deleteLater()
-            self.alt1api = None
-        if self.web_profile and isValid(self.web_profile):
-            self.web_profile.deleteLater()
-            self.web_profile = None
 
-    def __del__(self):
-        self.close()
+        if self.web_profile and isValid(self.web_profile):
+            self.web_profile.stop_requests()
+        if self.alt1api and isValid(self.alt1api):
+            self.alt1api._overlay.reset()
+        if self.window and isValid(self.window):
+            # The window owns the view, API, and profile. Delete the page before
+            # its profile by preserving QObject's child destruction order.
+            self.window.deleteLater()
+        self.window = None
+        self.alt1api = None
+        self.web_profile = None
 
     def get_window(self, **kwargs) -> AppWindow:
         self.window = AppWindow(app=self, **kwargs)

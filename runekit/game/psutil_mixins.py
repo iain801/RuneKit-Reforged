@@ -29,6 +29,9 @@ class PsUtilNetStat(PsUtilBaseMixin):
         self.__world_timer.start(60_000)
         self.__world_timer.timeout.connect(self.__update_world)
 
+    def stop_world_tracking(self):
+        self.__world_timer.stop()
+
     def get_world(self):
         if self.__last_world is None:
             self.__last_world = self.fetch_world()
@@ -36,10 +39,14 @@ class PsUtilNetStat(PsUtilBaseMixin):
         return self.__last_world
 
     def fetch_world(self) -> Optional[int]:
+        if not isinstance(self.pid, int) or self.pid <= 0:
+            return None
         try:
             addrs = self.__get_connections()
         except psutil.NoSuchProcess:
-            logger.debug("Game process pid %s no longer exists, cannot determine world", self.pid)
+            logger.debug(
+                "Game process pid %s no longer exists, cannot determine world", self.pid
+            )
             return None
         except psutil.AccessDenied:
             logger.warning("Cannot get connections for pid %s", self.pid, exc_info=True)
@@ -50,7 +57,7 @@ class PsUtilNetStat(PsUtilBaseMixin):
                 continue
 
             dns_name = self._rdns(conn.raddr.ip)
-            matched_name = self.world_regex.match(dns_name)
+            matched_name = self.world_regex.match(dns_name or "")
             if not matched_name:
                 continue
 
@@ -93,5 +100,8 @@ class PsUtilNetStat(PsUtilBaseMixin):
         if ip in self.__cached_rdns:
             return self.__cached_rdns[ip]
 
-        self.__cached_rdns[ip] = socket.getnameinfo((ip, 0), 0)[0]
+        try:
+            self.__cached_rdns[ip] = socket.getnameinfo((ip, 0), 0)[0]
+        except OSError:
+            return None
         return self.__cached_rdns[ip]

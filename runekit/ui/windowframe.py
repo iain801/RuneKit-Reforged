@@ -105,9 +105,13 @@ class _FrameInner(QWidget):
         layout.addLayout(top_row)
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(0)
-        top_row.addWidget(self.build_image("borderTL", Qt.Edge.TopEdge | Qt.Edge.LeftEdge))
+        top_row.addWidget(
+            self.build_image("borderTL", Qt.Edge.TopEdge | Qt.Edge.LeftEdge)
+        )
         top_row.addWidget(self.build_image("borderT", Qt.Edge.TopEdge, h_fix=False))
-        top_row.addWidget(self.build_image("borderTR", Qt.Edge.TopEdge | Qt.Edge.RightEdge))
+        top_row.addWidget(
+            self.build_image("borderTR", Qt.Edge.TopEdge | Qt.Edge.RightEdge)
+        )
 
         mid_row = QHBoxLayout()
         layout.addLayout(mid_row)
@@ -129,7 +133,9 @@ class _FrameInner(QWidget):
             )
         )
         bot_row.addWidget(self.build_image("borderB", Qt.Edge.BottomEdge, h_fix=False))
-        bot_row.addWidget(self.build_image("borderBR", Qt.Edge.BottomEdge | Qt.Edge.RightEdge))
+        bot_row.addWidget(
+            self.build_image("borderBR", Qt.Edge.BottomEdge | Qt.Edge.RightEdge)
+        )
 
     def build_image(self, name: str, edge=None, h_fix=True, v_fix=True):
         pixmap = QPixmap(SKIN + name)
@@ -218,21 +224,21 @@ class _ResizeHandle(QLabel):
         super().__init__(*args, **kwargs)
         self.edge = edge
 
-        if edge == Qt.Edge.TopEdge & Qt.Edge.LeftEdge:
+        if edge == Qt.Edge.TopEdge | Qt.Edge.LeftEdge:
             self.setCursor(Qt.CursorShape.SizeFDiagCursor)
         elif edge == Qt.Edge.TopEdge:
             self.setCursor(Qt.CursorShape.SizeVerCursor)
-        elif edge == Qt.Edge.TopEdge & Qt.Edge.RightEdge:
+        elif edge == Qt.Edge.TopEdge | Qt.Edge.RightEdge:
             self.setCursor(Qt.CursorShape.SizeBDiagCursor)
         elif edge == Qt.Edge.LeftEdge:
             self.setCursor(Qt.CursorShape.SizeHorCursor)
         elif edge == Qt.Edge.RightEdge:
             self.setCursor(Qt.CursorShape.SizeHorCursor)
-        elif edge == Qt.Edge.BottomEdge & Qt.Edge.LeftEdge:
+        elif edge == Qt.Edge.BottomEdge | Qt.Edge.LeftEdge:
             self.setCursor(Qt.CursorShape.SizeBDiagCursor)
         elif edge == Qt.Edge.BottomEdge:
             self.setCursor(Qt.CursorShape.SizeVerCursor)
-        elif edge == Qt.Edge.BottomEdge & Qt.Edge.RightEdge:
+        elif edge == Qt.Edge.BottomEdge | Qt.Edge.RightEdge:
             self.setCursor(Qt.CursorShape.SizeFDiagCursor)
 
     def mousePressEvent(self, ev):

@@ -64,9 +64,11 @@ class AppStoreModel(QAbstractItemModel):
         return len(self.h_columns)
 
     def rowCount(self, parent: QModelIndex) -> int:
+        if parent.isValid() and parent.column() != 0:
+            return 0
         if parent.isValid():
             data = typing.cast(_InternalData, parent.internalPointer())
-            return len(data["children"])
+            return len(data.get("children", []))
 
         return len(self.model)
 
@@ -108,13 +110,23 @@ class AppStoreModel(QAbstractItemModel):
         return "data" not in data
 
     def index(self, row: int, column: int, parent: QModelIndex) -> QModelIndex:
+        if (
+            (parent.isValid() and parent.column() != 0)
+            or row < 0
+            or column < 0
+            or column >= len(self.h_columns)
+        ):
+            return QModelIndex()
         if column != 0:
             leftmost = self.index(row, 0, parent)
+            if not leftmost.isValid():
+                return QModelIndex()
             return self.createIndex(row, column, leftmost.internalPointer())
 
         if parent.isValid():
             data = typing.cast(_InternalData, parent.internalPointer())
-            return data["children"][row]["index"]
+            children = data.get("children", [])
+            return children[row]["index"] if row < len(children) else QModelIndex()
 
         if row >= len(self.model):
             return QModelIndex()
@@ -122,6 +134,8 @@ class AppStoreModel(QAbstractItemModel):
         return self.model[row]["index"]
 
     def parent(self, index: QModelIndex) -> QModelIndex:
+        if not index.isValid():
+            return QModelIndex()
         data = typing.cast(_InternalData, index.internalPointer())
         return data["parent"] or QModelIndex()
 
@@ -129,7 +143,7 @@ class AppStoreModel(QAbstractItemModel):
         out = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
 
         if not index.isValid():
-            return out | Qt.ItemFlag.ItemIsDropEnabled
+            return Qt.ItemFlag.ItemIsDropEnabled
 
         data = typing.cast(_InternalData, index.internalPointer())
         if "data" in data:
